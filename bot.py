@@ -48,7 +48,6 @@ players_elo = {}
 K_FACTOR = 128
 BASE_ELO = 1000
 
-# Secret token
 TOKEN = ""
 
 # Function to calculate Elo change
@@ -196,7 +195,7 @@ async def play(ctx):
     
 
 @bot.command(name='result')
-async def result(ctx, team1_score: int, team2_score: int):
+async def result(ctx, *results: str):
     game = games.get(ctx.guild.id)
 
     if not game or game['state'] != 'started':
@@ -207,11 +206,21 @@ async def result(ctx, team1_score: int, team2_score: int):
         await ctx.send("You are not part of the current game.")
         return
 
-    game['result'] = {'team1_score': team1_score, 'team2_score': team2_score, 'reporter': ctx.author}
+    team1_wins = 0
+    team2_wins = 0
+    for result in results:
+        team1_score, team2_score = map(int, result.split('-'))
+        if team1_score > team2_score:
+            team1_wins += 1
+        else:
+            team2_wins += 1
+
+    game['result'] = {'team1_wins': team1_wins, 'team2_wins': team2_wins, 'reporter': ctx.author}
     game['votes'] = {player: None for player in game['team1'] + game['team2']}
     game['votes'][ctx.author] = 'yes'
     
-    await ctx.send(f'Result reported by {ctx.author.display_name}: \n\nTeam 1 ({game["team1"][0].display_name }, {game["team1"][1].display_name }): **{team1_score}** \nTeam 2 ({game["team2"][0].display_name }, {game["team2"][1].display_name }): **{team2_score}**\n\n !vote yes to confirm results.')
+    result_str = ' '.join(results)
+    await ctx.send(f'Result reported by {ctx.author.display_name}: {result_str}\n\n !vote yes to confirm results.')
 
 @bot.command(name='vote')
 async def vote(ctx, vote: str):
@@ -248,16 +257,16 @@ async def vote(ctx, vote: str):
         # Calculate Elo change and update Elo ratings
         team1_ids = [player.id for player in game['team1']]
         team2_ids = [player.id for player in game['team2']]
-        team1_score = game['result']['team1_score']
-        team2_score = game['result']['team2_score']
-        total_score = team1_score + team2_score
-        result_team1 = team1_score / total_score if total_score > 0 else 0.5
-        result_team2 = team2_score / total_score if total_score > 0 else 0.5
+        team1_wins = game['result']['team1_wins']
+        team2_wins = game['result']['team2_wins']
+        total_games = team1_wins + team2_wins
+        result_team1 = team1_wins / total_games if total_games > 0 else 0.5
+        result_team2 = team2_wins / total_games if total_games > 0 else 0.5
         await update_elo(ctx, team1_ids, team2_ids, result_team1)
         await update_elo(ctx, team2_ids, team1_ids, result_team2)
 
         # Save the game to the games table
-        c.execute('INSERT INTO games (guild_id, state, team1_score, team2_score, team1, team2) VALUES (?, ?, ?, ?, ?, ?)', (ctx.guild.id, 'completed', team1_score, team2_score, str(team1_ids), str(team2_ids)))
+        c.execute('INSERT INTO games (guild_id, state, team1_score, team2_score, team1, team2) VALUES (?, ?, ?, ?, ?, ?)', (ctx.guild.id, 'completed', team1_wins, team2_wins, str(team1_ids), str(team2_ids)))
             
         game['state'] = 'waiting'
         game['players'] = []
